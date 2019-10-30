@@ -76,15 +76,14 @@ def desktop2android(fname, info=None, separator=DEFAULT_SEPARATOR):
 
 parser = argparse.ArgumentParser(description='Sync PDF files between local and remote folders with file name matching.')
 parser.add_argument('-local', dest='loc', help='Local folder with Mendeley PDFs', required=True)
-parser.add_argument('-remote', dest='rem', help='Folder with annotated PDFs synced to remote location (e.g. Google Drive, Dropbox)',
-                    required=True)
-parser.add_argument('-cache', dest='cache', help='Cache file', default=None)
+parser.add_argument('-remote', dest='rem', help='Folder with annotated PDFs synced to remote location (e.g. Google Drive)', required=True)
 parser.add_argument('-dry', dest='dry', action='store_true', help='Dry run (don\'t copy pdfs)')
 parser.add_argument('-lr', dest='lr', action='store_true', help='Only sync local -> remote')
 parser.add_argument('-rl', dest='rl', action='store_true', help='Only sync remote -> local')
-parser.add_argument('-th', dest='threshold', action='store', help='String matching threshold, float value between 0.0 and 1.0',
+parser.add_argument('-th', dest='threshold', action='store', help='String matching threshold, float value between 0.0 and 1.0 (default: 0.92)',
                     default=0.92)
-parser.add_argument('-v', dest='verbose', action='store_true')
+parser.add_argument('-v', dest='verbose', help='Verbose mode (also show info about correctly matched files)', action='store_true')
+# parser.add_argument('-cache', dest='cache', help='Cache file', default=None)
 
 args = parser.parse_args()
 if args.lr and args.rl:
@@ -241,6 +240,7 @@ print('=== **************************************** ===')
 print('===              COPYING FILES               ===')
 print('=== **************************************** ===\n')
 
+
 def copy(local_file, remote_file, mode):
     prepend = "(DRY/FAKE)" if args.dry else ""
     if mode is 'l2r':
@@ -270,15 +270,17 @@ for remote_f, local_f in cache['rlpairs'].items():
         print('\nUNKOWN ERROR (rem_size is None, loc_size is None)')
 
     elif rem_size is None and loc_size is not None:  # new local file to be copied in remote
-        print('\nNew local file will be added in remote: ')
-        copy(local_f, remote_f, 'l2r')
+        if args.lr:
+            print('\nNew local file will be added in remote: ')
+            copy(local_f, remote_f, 'l2r')
 
     elif rem_size is not None and loc_size is None:  # new remote file to be copied in local
-        print('\nNew remote file will be added in local: ')
-        copy(local_f, remote_f, 'r2l')
+        if args.rl:
+            print('\nNew remote file will be added in local: ')
+            copy(local_f, remote_f, 'r2l')
 
     else:
-        if loc_size != rem_size:
+        if loc_size != rem_size and args.rl:
             print(f'\nDifferent remote version will be copied in local (remote size: {rem_size}, local size: {loc_size}')
             copy(local_f, remote_f, 'r2l')
 
