@@ -82,6 +82,9 @@ parser.add_argument('-cache', dest='cache', help='Cache file', default=None)
 parser.add_argument('-dry', dest='dry', action='store_true', help='Dry run (don\'t copy pdfs)')
 parser.add_argument('-lr', dest='lr', action='store_true', help='Only sync local -> remote')
 parser.add_argument('-rl', dest='rl', action='store_true', help='Only sync remote -> local')
+parser.add_argument('-th', dest='threshold', action='store', help='String matching threshold, float value between 0.0 and 1.0',
+                    default=0.92)
+parser.add_argument('-v', dest='verbose', action='store_true')
 
 args = parser.parse_args()
 if args.lr and args.rl:
@@ -92,7 +95,7 @@ if not args.lr and not args.rl:
 
 # List Local files
 local_files = glob.glob(args.loc + '/*[Pp][Dd][Ff]')
-local_files = [str.replace(filen, args.loc + '/', '') for filen in local_files]
+local_files = sorted([str.replace(filen, args.loc + '/', '') for filen in local_files])
 local_dict = {}
 for local_f in local_files:
     try:
@@ -104,7 +107,7 @@ for local_f in local_files:
 
 # List Remote files
 remote_files = glob.glob(args.rem + '/*[Pp][Dd][Ff]')
-remote_files = [str.replace(filen, args.rem + '/', '') for filen in remote_files]
+remote_files = sorted([str.replace(filen, args.rem + '/', '') for filen in remote_files])
 remote_dict = {}
 for remote_f in remote_files:
     try:
@@ -119,15 +122,23 @@ if args.cache is not None and os.path.isfile(args.cache):
     cache = pickle.load(open(args.cache, "rb"))
     print('Cache loaded')
 else:
-    cache = {'oldfiles': [], 'rlpairs': {}}
+    cache = {'oldfiles': [], 'rlpairs': {}, 'matched_remote': []}
 
+
+def vprint(s: str):
+    if args.verbose:
+        print(s)
 
 
 def compute_score(local_info, remote_info):
     title_score = SequenceMatcher(None, local_info[TITLE_KEY].lower(), remote_info[TITLE_KEY].lower()).ratio()
     author_score = SequenceMatcher(None, local_info[MAIN_AUTHOR_KEY].lower(), remote_info[MAIN_AUTHOR_KEY].lower()).ratio()
+    author_score_wo_et_al = SequenceMatcher(None, local_info[MAIN_AUTHOR_KEY].lower().split(' et al.')[0],
+                                            remote_info[MAIN_AUTHOR_KEY].lower().split(' et al.')[0]).ratio()
+    author_score = max(author_score, author_score_wo_et_al)
+
     year_score = SequenceMatcher(None, local_info[YEAR_KEY].lower(), remote_info[YEAR_KEY].lower()).ratio()
-    return .8 * title_score + .15 * author_score + .05 * year_score
+    return .85 * title_score + .1 * author_score + .05 * year_score
 
 
 if args.lr:
@@ -141,7 +152,22 @@ if args.lr:
     for local_f, local_info in local_dict.items():
         local_f_converted = desktop2android(local_f, local_info)
 
-        if local_f_converted not in remote_files and local_f not in cache['oldfiles']:
+        if local_f_converted in remote_files:
+            if local_f_converted in cache['rlpairs'].keys():
+                print(f' - WARNING: LOCAL FILE   `{local_f}`\n'
+                      f'            CONVERTED TO `{local_f_converted}`\n'
+                      f'            BUT CONVERTED NAME IS ALREADY MATCHED BY LOCAL FILE: `{cache["rlpairs"][local_f_converted]}` (THIS FILE IS STEALING THE OLD MATCH!!)\n')
+                cache['rlpairs'][local_f_converted] = local_f
+
+            else:
+                vprint(f' + LOCAL FILE:      `{local_f}`\n'
+                       f'   MATCHED REMOTE:  `{local_f_converted}`\n')
+                # cache['oldfiles'].append(local_f)
+                cache['rlpairs'][local_f_converted] = local_f
+
+            # cache['matched_remote'].append(local_f_converted)
+
+        else:  # elif local_f not in cache['oldfiles']:
             best = ''
             bestscore = 0
             for remote_f, remote_info in remote_dict.items():
@@ -152,17 +178,26 @@ if args.lr:
                     bestscore = score
                     best = remote_f
 
-            if bestscore < .9:
-                print(f' - NEW LOCAL FILE:     `{local_f}`')
-                print(f'   TARGET REMOTE:      `{best}`\n')
-                if not args.dry:
-                    copyfile(args.loc + '/' + local_f, args.rem + '/' + local_f_converted)
-                    cache['oldfiles'].append(local_f)
-            else:
-                print(f' - MATCHED LOCAL FILE: `{local_f}`')
-                print(f'   MATCHED REMOTE:     `{best}`\n')
-                cache['oldfiles'].append(local_f)
+            if bestscore >= args.threshold:
+                if local_f_converted in cache['rlpairs'].keys():
+                    print(f' - WARNING: LOCAL FILE:  `{local_f}`\n'
+                          f'            MATCHED TO:  `{best}`\n'
+                          f'            BUT MATCHED NAME WAS ALREADY MATCHED BY LOCAL FILE: `{cache["rlpairs"]}`\n')
+                else:
+                    vprint(f' + LOCAL FILE:     `{local_f}`')
+                    vprint(f'   BEST REMOTE:    `{best}`')
+                    vprint(f'   MATCHED WITH SCORE {bestscore}\n')
+                    # cache['oldfiles'].append(local_f)
+                    cache['rlpairs'][best] = local_f
 
+            else:
+                print(f' - LOCAL FILE:     `{local_f}`')
+                print(f'   BEST REMOTE:    `{best}`')
+                print(f'   DISCARTED WITH SCORE {bestscore} (IS UNDER THE THRESHOLD {args.threshold})')
+                print(f'   +++ CONSIDERED A NEW ONE, MAPPING TO: {local_f_converted}\n')
+                cache['rlpairs'][local_f_converted] = local_f
+
+processed = []
 if args.rl:
     print('\n\n\n')
     print('=== **************************************** ===')
@@ -172,6 +207,7 @@ if args.rl:
 
         if remote_f in cache['rlpairs']:
             best = cache['rlpairs'][remote_f]
+            processed.append(best)
         else:
             filen = str.replace(remote_f, '..', '.')
             filen = str.replace(filen, '_', '')
@@ -183,25 +219,72 @@ if args.rl:
                 if score > bestscore:
                     bestscore = score
                     best = local_f
-            if bestscore < .9:
-                print(f"\n  WARNING - NO MATCH:   `{filen}`")
-                print(f"DISCARDED BEST MATCH:   `{best}`")
+            if bestscore < args.threshold:
+                print(f' - REMOTE FILE:  `{remote_f}`')
+                print(f'   BEST LOCAL:   `{best}`')
+                print(f'   DISCARTED WITH SCORE {bestscore} (IS UNDER THE THRESHOLD {args.threshold})\n')
                 continue
-            cache['rlpairs'][remote_f] = best
-        # Get file sizes
-        loc_size = os.path.getsize(args.loc + '/' + best)
-        rem_size = os.path.getsize(args.rem + '/' + remote_f)
-
-        # If different cp from remote to local
-        if loc_size != rem_size:
-            if args.dry:
-                print("Copy " + remote_f + ' to ' + best)
             else:
-                copyfile(args.rem + '/' + remote_f, args.loc + '/' + best)
+                if remote_f in cache['rlpairs'].keys():
+                    print(f' - WARNING: REMOTE FILE:  `{remote_f}`\n'
+                          f'            MATCHED TO:   `{best}`\n'
+                          f'            BUT MATCHED NAME WAS ALREADY MATCHED BY LOCAL FILE: `{cache["rlpairs"]}`\n')
+                else:
+                    vprint(f' + REMOTE FILE:    `{remote_f}`')
+                    vprint(f'   BEST LOCAL:     `{best}`')
+                    vprint(f'   MATCHED WITH SCORE {bestscore}\n')
+                    # cache['oldfiles'].append(local_f)
+                    cache['rlpairs'][remote_f] = best
 
-# Save cache
-if args.cache is not None:
-    pickle.dump(cache, open(args.cache, "wb"))
-    print('Cache saved')
-else:
-    print('Cache NOT saved (use -cache <filename> option to save cache!)')
+print('\n\n\n')
+print('=== **************************************** ===')
+print('===              COPYING FILES               ===')
+print('=== **************************************** ===\n')
+
+def copy(local_file, remote_file, mode):
+    prepend = "(DRY/FAKE)" if args.dry else ""
+    if mode is 'l2r':
+        print(f"{prepend}Copy local to remote: {local_file}  -->  {remote_file}")
+        if not args.dry:
+            copyfile(args.loc + '/' + local_file, args.rem + '/' + remote_file)
+    elif mode is 'r2l':
+        print(f"{prepend}Copy remote to local: {remote_file}  -->  {local_file}")
+        if not args.dry:
+            copyfile(args.loc + '/' + local_file, args.rem + '/' + remote_file)
+
+
+for remote_f, local_f in cache['rlpairs'].items():
+    # Get file sizes
+    # loc_time = os.path.getctime(args.loc + '/' + local_f)
+    # rem_time = os.path.getctime(args.rem + '/' + remote_f)
+    try:
+        loc_size = os.path.getsize(args.loc + '/' + local_f)
+    except:
+        loc_size = None
+    try:
+        rem_size = os.path.getsize(args.rem + '/' + remote_f)
+    except:
+        rem_size = None
+
+    if rem_size is None and loc_size is None:
+        print('\nUNKOWN ERROR (rem_size is None, loc_size is None)')
+
+    elif rem_size is None and loc_size is not None:  # new local file to be copied in remote
+        print('\nNew local file will be added in remote: ')
+        copy(local_f, remote_f, 'l2r')
+
+    elif rem_size is not None and loc_size is None:  # new remote file to be copied in local
+        print('\nNew remote file will be added in local: ')
+        copy(local_f, remote_f, 'r2l')
+
+    else:
+        if loc_size != rem_size:
+            print(f'\nDifferent remote version will be copied in local (remote size: {rem_size}, local size: {loc_size}')
+            copy(local_f, remote_f, 'r2l')
+
+# # Save cache
+# if args.cache is not None:
+#     pickle.dump(cache, open(args.cache, "wb"))
+#     print('Cache saved')
+# else:
+#     print('Cache NOT saved (use -cache <filename> option to save cache!)')
