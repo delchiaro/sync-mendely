@@ -117,11 +117,11 @@ for remote_f in remote_files:
     remote_dict[remote_f] = info
 
 # Load cache file
-if args.cache is not None and os.path.isfile(args.cache):
-    cache = pickle.load(open(args.cache, "rb"))
-    print('Cache loaded')
-else:
-    cache = {'oldfiles': [], 'rlpairs': {}, 'matched_remote': []}
+# if args.cache is not None and os.path.isfile(args.cache):
+#     cache = pickle.load(open(args.cache, "rb"))
+#     print('Cache loaded')
+# else:
+cache = {'oldfiles': [], 'rlpairs': {}, 'matched_remote': []}
 
 
 def vprint(s: str):
