@@ -250,7 +250,7 @@ def copy(local_file, remote_file, mode):
     elif mode is 'r2l':
         print(f"{prepend}Copy remote to local: {remote_file}  -->  {local_file}")
         if not args.dry:
-            copyfile(args.loc + '/' + local_file, args.rem + '/' + remote_file)
+            copyfile(args.rem + '/' + remote_file, args.loc + '/' + local_file)
 
 
 for remote_f, local_f in cache['rlpairs'].items():
