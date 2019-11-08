@@ -57,13 +57,13 @@ def desktop2android(fname, info=None, separator=DEFAULT_SEPARATOR):
     converted_year = ''
     converted_title = ''
 
-    if info[AUTHOR_KEY].lower() is not 'unknown':
+    if info[AUTHOR_KEY].lower() != 'unknown':
         converted_author = info['author'].split(' ')[0].split(',')[0].split('.')[0]
 
-    if info[YEAR_KEY].lower() is not 'unknown':
+    if info[YEAR_KEY].lower() != 'unknown':
         converted_year = info['year']
 
-    if info[TITLE_KEY].lower() is not 'unknown':
+    if info[TITLE_KEY].lower() != 'unknown':
         converted_title = info['title'].replace('_', ': ').replace(': : ', '__')
 
     # print("author: " + converted_author)
